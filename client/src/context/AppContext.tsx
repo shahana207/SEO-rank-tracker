@@ -11,9 +11,9 @@ import axios, {
 } from "axios";
 
 
-// ================================
+
 // User Type
-// ================================
+
 
 interface User {
   id: string;
@@ -24,9 +24,8 @@ interface User {
 }
 
 
-// ================================
 // Authentication Response
-// ================================
+
 
 interface AuthResponse {
   success: boolean;
@@ -34,9 +33,9 @@ interface AuthResponse {
 }
 
 
-// ================================
+
 // App Context Type
-// ================================
+
 
 interface AppContextType {
   user: User | null;
@@ -62,27 +61,23 @@ interface AppContextType {
 }
 
 
-// ================================
 // Backend URL
-// ================================
+
 
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ||
   "http://localhost:5000";
 
 
-// ================================
 // Axios Instance
-// ================================
+
 
 const api = axios.create({
   baseURL: `${BACKEND_URL}/api`,
 });
 
 
-// ================================
 // Context
-// ================================
 
 const AppContext =
   createContext<AppContextType | undefined>(
@@ -90,9 +85,9 @@ const AppContext =
   );
 
 
-// ================================
+
 // App Provider
-// ================================
+
 
 export function AppProvider({
   children,
@@ -111,9 +106,9 @@ export function AppProvider({
     useState(true);
 
 
-  // ================================
+  
   // Add JWT token to API requests
-  // ================================
+  
 
   useEffect(() => {
     const requestInterceptor =
@@ -139,9 +134,8 @@ export function AppProvider({
   }, [token]);
 
 
-  // ================================
+
   // Get Current User
-  // ================================
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -181,9 +175,9 @@ export function AppProvider({
   }, [token]);
 
 
-  // ================================
+  
   // Login
-  // ================================
+  
 
   const login = async (
     email: string,
@@ -230,9 +224,9 @@ export function AppProvider({
   };
 
 
-  // ================================
+  
   // Register
-  // ================================
+  
 
   const register = async (
     name: string,
@@ -281,10 +275,8 @@ export function AppProvider({
   };
 
 
-  // ================================
+ 
   // Logout
-  // ================================
-
   const logout = () => {
     localStorage.removeItem("token");
 
@@ -293,10 +285,7 @@ export function AppProvider({
     setUser(null);
   };
 
-
-  // ================================
   // Context Value
-  // ================================
 
   const value: AppContextType = {
     user,
@@ -309,9 +298,8 @@ export function AppProvider({
   };
 
 
-  // ================================
   // Provider
-  // ================================
+
 
   return (
     <AppContext.Provider value={value}>
@@ -320,10 +308,7 @@ export function AppProvider({
   );
 }
 
-
-// ================================
 // Custom Hook
-// ================================
 
 export function useAppContext() {
   const context =
