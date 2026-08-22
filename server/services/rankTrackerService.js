@@ -1,267 +1,257 @@
-import { chromium } from "playwright-core";
-import Browserbase from "@browserbasehq/sdk";
-
-const bb = new Browserbase({
-  apiKey: process.env.BROWSERBASE_API_KEY,
-});
+import axios from "axios";
 
 export async function rankTracker(keyword, targetDomain) {
-  let browser;
-
-  try {
-    // 1. Create Browserbase session
-    const session = await bb.sessions.create({
-      browserSettings: {
-        blockAds: true,
-      },
-    });
-
-    browser = await chromium.connectOverCDP(session.connectUrl);
-
-    const context = browser.contexts()[0];
-    const pages = context.pages();
-
-    const page = pages.length
-      ? pages[0]
-      : await context.newPage();
-
-    page.setDefaultNavigationTimeout(45000);
-
-    // 2. Initial Google visit and consent handling
-    await page.goto("https://www.google.com", {
-      waitUntil: "networkidle",
-    });
-
     try {
-      const btn = await page.$(
-        'button#L2AGLB, form[action*="consent"] button'
-      );
+        console.log(
+            `Checking keyword "${keyword}" for "${targetDomain}"`
+        );
 
-      if (btn) {
-        await btn.click();
-        await page.waitForTimeout(1500);
-      }
-    } catch (error) {
-      // Continue if consent is not shown
-    }
+        // =====================================================
+        // 1. CHECK SERPER API KEY
+        // =====================================================
 
-    let found = null;
-    let allResults = [];
+        if (!process.env.SERPER_API_KEY) {
+            throw new Error(
+                "SERPER_API_KEY is missing in server/.env"
+            );
+        }
 
-    const cleanTarget = targetDomain
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .split("/")[0]
-      .toLowerCase();
+        // =====================================================
+        // 2. CLEAN TARGET DOMAIN
+        // =====================================================
 
-    // 3. Search loop: iterate through up to 5 pages
-    for (let gPage = 0; gPage < 5; gPage++) {
-      const start = gPage * 10;
+        const cleanTarget = targetDomain
+            .replace(/^https?:\/\//, "")
+            .replace(/^www\./, "")
+            .split("/")[0]
+            .toLowerCase()
+            .trim();
 
-      const searchUrl =
-        `https://www.google.com/search?q=${encodeURIComponent(keyword)}` +
-        `&start=${start}&num=10&hl=en&gl=us`;
+        console.log("Target domain:", cleanTarget);
 
-      await page.goto(searchUrl, {
-        waitUntil: "networkidle",
-      });
+        // =====================================================
+        // 3. SEARCH GOOGLE - UP TO 5 PAGES
+        // =====================================================
 
-      let pageResults = [];
+        const allResults = [];
 
-      // 4. Retry Google result loading up to 3 times
-      for (let retry = 0; retry < 3; retry++) {
-        try {
-          await page.waitForSelector("h3", {
-            timeout: 8000,
-          });
+        for (let page = 1; page <= 5; page++) {
+            console.log(
+                `Checking Serper Google page ${page}/5`
+            );
 
-          await page.waitForTimeout(1000);
+            const response = await axios.post(
+                "https://google.serper.dev/search",
+                {
+                    q: keyword,
+                    gl: "us",
+                    hl: "en",
+                    num: 10,
+                    page: page,
+                },
+                {
+                    headers: {
+                        "X-API-KEY":
+                            process.env.SERPER_API_KEY,
 
-          pageResults = await page.evaluate(() => {
-            return Array.from(
-              document.querySelectorAll("h3")
-            )
-              .map((h3) => {
-                let a = h3.closest("a");
+                        "Content-Type":
+                            "application/json",
+                    },
 
-                if (!a) {
-                  let p = h3.parentElement;
-
-                  for (
-                    let j = 0;
-                    j < 6 && p;
-                    j++, p = p.parentElement
-                  ) {
-                    const sub = p.querySelector("a[href]");
-
-                    if (sub && sub.contains(h3)) {
-                      a = sub;
-                      break;
-                    }
-                  }
+                    timeout: 30000,
                 }
+            );
 
-                if (
-                  !a ||
-                  !a.href ||
-                  !a.href.startsWith("http") ||
-                  a.href.includes("google.")
-                ) {
-                  return null;
-                }
+            const organicResults =
+                response.data?.organic || [];
 
-                let snippet = "";
+            console.log(
+                `Serper page ${page} returned ${organicResults.length} results`
+            );
 
-                let container = a.parentElement;
+            if (organicResults.length === 0) {
+                break;
+            }
 
-                for (
-                  let j = 0;
-                  j < 6 && container;
-                  j++, container = container.parentElement
-                ) {
-                  const text =
-                    container.innerText || "";
-
-                  if (
-                    text.length >
-                    h3.innerText.length + 50
-                  ) {
-                    snippet = text
-                      .split("\n")
-                      .filter(
-                        (line) =>
-                          line.length > 30 &&
-                          !line.includes(h3.innerText)
-                      )
-                      .slice(0, 2)
-                      .join(" ")
-                      .trim()
-                      .substring(0, 300);
-
-                    if (snippet) {
-                      break;
-                    }
-                  }
-                }
-
+            for (const result of organicResults) {
                 let domain = "";
 
                 try {
-                  domain = new URL(a.href)
-                    .hostname
-                    .replace(/^www\./, "");
-                } catch (error) {
-                  domain = "";
+                    domain = new URL(result.link)
+                        .hostname
+                        .replace(/^www\./, "")
+                        .toLowerCase();
+                } catch {
+                    continue;
                 }
 
-                return {
-                  url: a.href,
-                  domain,
-                  title: h3.innerText.trim(),
-                  snippet,
-                };
-              })
-              .filter(Boolean);
-          });
+                allResults.push({
+                    position:
+                        result.position ||
+                        allResults.length + 1,
 
-          if (pageResults.length > 0) {
-            break;
-          }
-        } catch (error) {
-          if (retry === 2) {
-            console.log(
-              `Google results failed on page ${gPage + 1}`
+                    url:
+                        result.link || "",
+
+                    domain,
+
+                    title:
+                        result.title || "",
+
+                    snippet:
+                        result.snippet || "",
+                });
+            }
+
+            // If target was found, we don't need more pages
+            const targetFound = allResults.some(
+                (result) => {
+                    const resultDomain =
+                        result.domain;
+
+                    return (
+                        resultDomain ===
+                            cleanTarget ||
+                        resultDomain.endsWith(
+                            `.${cleanTarget}`
+                        ) ||
+                        cleanTarget.endsWith(
+                            `.${resultDomain}`
+                        )
+                    );
+                }
             );
-          }
 
-          await page.waitForTimeout(1500);
+            if (targetFound) {
+                console.log(
+                    `Target found on Serper page ${page}`
+                );
 
-          try {
-            await page.reload({
-              waitUntil: "networkidle",
-            });
-          } catch (reloadError) {
-            // Continue to next retry
-          }
+                break;
+            }
         }
-      }
 
-      if (!pageResults.length) {
-        break;
-      }
+        // =====================================================
+        // 4. FIND TARGET WEBSITE
+        // =====================================================
 
-      // 5. Result synthesis: update global results and check target
-      for (const r of pageResults) {
-        r.position = allResults.length + 1;
-        allResults.push(r);
+        let found = null;
 
-        const resultDomain = r.domain.toLowerCase();
+        for (const result of allResults) {
+            const resultDomain =
+                result.domain.toLowerCase();
 
-        if (
-          !found &&
-          (
-            resultDomain.includes(cleanTarget) ||
-            cleanTarget.includes(resultDomain)
-          )
-        ) {
-          found = {
-            ...r,
-            page: gPage + 1,
-          };
+            const targetMatches =
+                resultDomain === cleanTarget ||
+                resultDomain.endsWith(
+                    `.${cleanTarget}`
+                ) ||
+                cleanTarget.endsWith(
+                    `.${resultDomain}`
+                );
+
+            if (targetMatches) {
+                found = {
+                    ...result,
+
+                    page: Math.ceil(
+                        result.position / 10
+                    ),
+                };
+
+                console.log(
+                    `TARGET FOUND at position ${result.position}`
+                );
+
+                break;
+            }
         }
-      }
 
-      if (found) {
-        break;
-      }
+        // =====================================================
+        // 5. COMPETITORS
+        // =====================================================
 
-      await page.waitForTimeout(
-        2000 + Math.random() * 2000
-      );
-    }
+        const competitors =
+            allResults
+                .filter((result) => {
+                    const resultDomain =
+                        result.domain.toLowerCase();
 
-    // 6. Finalization: close browser and extract competitors
-    await browser.close();
-    browser = null;
+                    return !(
+                        resultDomain ===
+                            cleanTarget ||
+                        resultDomain.endsWith(
+                            `.${cleanTarget}`
+                        ) ||
+                        cleanTarget.endsWith(
+                            `.${resultDomain}`
+                        )
+                    );
+                })
+                .slice(0, 10);
 
-    const competitors = allResults
-      .filter((r) => {
-        const resultDomain =
-          r.domain.toLowerCase();
+        // =====================================================
+        // 6. LOG RESULT
+        // =====================================================
 
-        return (
-          !resultDomain.includes(cleanTarget) &&
-          !cleanTarget.includes(resultDomain)
+        console.log(
+            `Rank check completed. Results scanned: ${allResults.length}`
         );
-      })
-      .slice(0, 10);
 
-    return {
-      success: true,
-      data: {
-        keyword,
-        targetDomain,
-        position: found?.position || null,
-        page: found?.page || null,
-        title: found?.title || "",
-        snippet: found?.snippet || "",
-        competitors,
-        totalResultsScanned: allResults.length,
-      },
-    };
-  } catch (error) {
-    console.error(
-      "Rank check error:",
-      error.message
-    );
+        if (found) {
+            console.log(
+                `Website found at position ${found.position}`
+            );
+        } else {
+            console.log(
+                "Website was not found in top 50 results"
+            );
+        }
 
-    if (browser) {
-      await browser.close().catch(() => {});
+        // =====================================================
+        // 7. RETURN RESULT
+        // =====================================================
+
+        return {
+            success: true,
+
+            data: {
+                keyword,
+
+                targetDomain,
+
+                position:
+                    found?.position || null,
+
+                page:
+                    found?.page || null,
+
+                title:
+                    found?.title || "",
+
+                snippet:
+                    found?.snippet || "",
+
+                competitors,
+
+                totalResultsScanned:
+                    allResults.length,
+            },
+        };
+    } catch (error) {
+        console.error(
+            "Rank check error:",
+            error.response?.data ||
+                error.message
+        );
+
+        return {
+            success: false,
+
+            error:
+                error.response?.data?.message ||
+                error.message ||
+                "Rank check failed",
+        };
     }
-
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
 }

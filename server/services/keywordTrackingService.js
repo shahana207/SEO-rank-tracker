@@ -2,9 +2,9 @@ import { rankTracker } from "./rankTrackerService.js";
 
 export async function keywordTracking(tracking) {
   try {
-    let result;
+    let result = null;
 
-    // 1. Try the rank check up to 2 times
+    // Try the ranking check up to 2 times
     for (let attempt = 1; attempt <= 2; attempt++) {
       result = await rankTracker(
         tracking.keyword,
@@ -12,8 +12,8 @@ export async function keywordTracking(tracking) {
       );
 
       if (
-        result.success &&
-        result.data &&
+        result?.success &&
+        result?.data &&
         result.data.totalResultsScanned > 0
       ) {
         break;
@@ -29,12 +29,13 @@ export async function keywordTracking(tracking) {
       }
     }
 
-    // 2. Update tracking data when rank check succeeds
-    if (result.success && result.data) {
+    // Update tracking when ranking check succeeds
+    if (result?.success && result?.data) {
       const previousPosition =
         tracking.currentPosition;
 
       const today = new Date();
+
       today.setHours(0, 0, 0, 0);
 
       tracking.currentPosition =
@@ -44,31 +45,34 @@ export async function keywordTracking(tracking) {
         result.data.page;
 
       tracking.competitors =
-        result.data.competitors;
+        result.data.competitors || [];
 
-      tracking.lastChecked = new Date();
+      tracking.lastChecked =
+        new Date();
 
-      tracking.status = "complete";
+      tracking.status =
+        "complete";
 
-      // 3. Update position change
+      // Calculate position change
       tracking.positionChange =
         previousPosition && result.data.position
           ? previousPosition - result.data.position
           : 0;
 
-      // 4. Update best position
+      // Update best position
       if (
         result.data.position &&
         (
           !tracking.bestPosition ||
-          result.data.position < tracking.bestPosition
+          result.data.position <
+            tracking.bestPosition
         )
       ) {
         tracking.bestPosition =
           result.data.position;
       }
 
-      // 5. Create today's history entry
+      // Create history entry
       const historyEntry = {
         date: today,
         position: result.data.position,
@@ -77,7 +81,7 @@ export async function keywordTracking(tracking) {
         snippet: result.data.snippet || "",
       };
 
-      // 6. Check if today's history already exists
+      // Check today's history
       const historyIndex =
         tracking.rankHistory.findIndex(
           (history) =>
@@ -85,19 +89,19 @@ export async function keywordTracking(tracking) {
             today.toDateString()
         );
 
-      // 7. Update today's history or add a new entry
+      // Update or add today's history
       if (historyIndex >= 0) {
         tracking.rankHistory[historyIndex] =
           historyEntry;
       } else {
-        tracking.rankHistory.push(historyEntry);
+        tracking.rankHistory.push(
+          historyEntry
+        );
       }
     } else {
-      // 8. Mark tracking as failed
       tracking.status = "failed";
     }
 
-    // 9. Save tracking data
     await tracking.save();
 
     return result;
@@ -113,7 +117,7 @@ export async function keywordTracking(tracking) {
 
     return {
       success: false,
-      error: error.message,
+      message: error.message,
     };
   }
 }

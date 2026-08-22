@@ -17,18 +17,20 @@ app.use(express.json());
 // Database
 connectDB();
 
-// Routes
+// Auth routes
 app.use("/api/auth", authRouter);
+
+// Rank tracker routes
 app.use("/api/rank", rankRouter);
 
 // Test route
 app.get("/", (req, res) => {
-    res.json({
-        success: true,
-        message: "SEO Rank Tracker API is running",
-    });
+  res.json({
+    success: true,
+    message: "SEO Rank Tracker API is running",
+  });
 });
 
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });

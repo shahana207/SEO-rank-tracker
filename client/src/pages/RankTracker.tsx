@@ -1,8 +1,8 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Target, Plus, RefreshCw, Trash2, TrendingUp, TrendingDown, Minus, ExternalLink, Clock, Loader2, X, Search, Globe, AlertCircle, Eye, EyeOff, Filter, ArrowUpDown } from "lucide-react";
-import { dummyRankings } from "../assets/assets";
+import { useAppContext } from "../context/AppContext";
 
 interface KeywordItem {
     _id: string;
@@ -16,10 +16,22 @@ interface KeywordItem {
     active: boolean;
     lastChecked: string | null;
     status: string;
-    competitors: { position: number; url: string; domain: string; title: string; snippet: string }[];
+    createdAt: string;
+    updatedAt: string;
+    competitors: {
+        position: number;
+        url: string;
+        domain: string;
+        title: string;
+        snippet: string;
+    }[];
 }
 
 export default function RankTracker() {
+
+    const {api}= useAppContext()
+
+
     const [keywords, setKeywords] = useState<KeywordItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddModal, setShowAddModal] = useState(false);
@@ -34,39 +46,171 @@ export default function RankTracker() {
     const [sortBy, setSortBy] = useState("newest");
 
     const fetchKeywords = async () => {
-        setTimeout(() => {
-            setKeywords(dummyRankings);
-            setLoading(false);
-        }, 1000);
+       try {
+        const res = await api.get("/rank/keywords");
+        if(res.data.success){
+            setKeywords(res.data.keywords)
+        }
+       } catch (err) {
+        console.error("Failed to fetch keywords:", err);
+        
+       }
+       setLoading(false)
     };
 
     const handleAdd = async (e: React.SubmitEvent) => {
         e.preventDefault();
+        if(!newKeyword.trim() || !newUrl.trim()) return;
+
         setAdding(true);
-        setTimeout(() => {
-            setShowAddModal(false);
-            setAdding(false);
-        }, 1000);
+        setAddError("");
+        try {
+            const res = await api.post("/rank/keywords", {
+  keyword: newKeyword.trim(),
+  url: newUrl.trim(),
+});
+            if(res.data.success){
+                setKeywords((prev)=>[res.data.tracking, ...prev])
+                setNewKeyword("")
+                setNewUrl("")
+                setShowAddModal(false)
+
+                // Poll foe completion
+                const id =res.data.tracking._id;
+                const pollInterval =setInterval(async()=>{
+                    try {
+                        const check = await api.get(`/rank/keywords/${id}`);
+                        if(check.data.tracking.status !== "checking"){
+                            clearInterval(pollInterval)
+                            setKeywords((prev)=>prev.map((k)=>(k._id===id ? check.data.tracking:k)))
+
+                        }
+                    } catch (error:any) {
+                      console.error(error)  
+                    }
+                },3000)
+
+            }
+        } catch (error:any) {
+            setAddError(error.response?.data?.message || "Failed to add keyword")
+        }
+        setAdding(false)
     };
 
-    const handleRefresh = async (id: string) => {
-        setRefreshing(id);
-        setTimeout(() => {
+   const handleRefresh = async (id: string) => {
+  setRefreshing(id);
+
+  try {
+    const res = await api.post(
+      `/rank/keywords/${id}/refresh`
+    );
+
+    if (res.data.success) {
+      setKeywords((prev) =>
+        prev.map((keyword) =>
+          keyword._id === id
+            ? res.data.tracking
+            : keyword
+        )
+      );
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const check = await api.get(
+            `/rank/keywords/${id}`
+          );
+
+          if (
+            check.data.tracking.status !==
+            "checking"
+          ) {
+            clearInterval(pollInterval);
+
+            setKeywords((prev) =>
+              prev.map((keyword) =>
+                keyword._id === id
+                  ? check.data.tracking
+                  : keyword
+              )
+            );
+
             setRefreshing(null);
-        }, 1000);
-    };
+          }
+        } catch (error) {
+          console.error(
+            "Refresh check error:",
+            error
+          );
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("Delete this keyword tracking?")) return;
-        setDeleting(id);
-        setTimeout(() => {
-            setDeleting(null);
-        }, 1000);
-    };
+          clearInterval(pollInterval);
+          setRefreshing(null);
+        }
+      }, 3000);
+    } else {
+      setRefreshing(null);
+    }
+  } catch (error: any) {
+    console.error(
+      "Refresh keyword error:",
+      error
+    );
 
-    const handleToggle = async (id: string) => {
-        console.log(id);
-    };
+    setRefreshing(null);
+  }
+};
+
+  const handleDelete = async (id: string) => {
+  if (!confirm("Delete this keyword tracking?")) {
+    return;
+  }
+
+  setDeleting(id);
+
+  try {
+    const res = await api.delete(
+      `/rank/keywords/${id}`
+    );
+
+    if (res.data.success) {
+      setKeywords((prev) =>
+        prev.filter(
+          (keyword) => keyword._id !== id
+        )
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Delete keyword error:",
+      error
+    );
+  } finally {
+    setDeleting(null);
+  }
+};
+
+const handleToggle = async (id: string) => {
+  try {
+    const res = await api.patch(
+      `/rank/keywords/${id}/toggle`
+    );
+
+    if (res.data.success) {
+      setKeywords((prev) =>
+        prev.map((keyword) =>
+          keyword._id === id
+            ? res.data.tracking
+            : keyword
+        )
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Toggle tracking error:",
+      error
+    );
+  }
+};
+
 
     const getPositionBadge = (pos: number | null) => {
         if (pos === null) return { text: "Not Ranked", class: "text-muted-foreground bg-muted/50" };
@@ -204,7 +348,7 @@ export default function RankTracker() {
                                             ) : (
                                                 <div className={`w-16 h-16 rounded-xl flex items-center justify-center text-lg font-bold ${posBadge.class}`}>{kw.currentPosition ? `#${kw.currentPosition}` : "—"}</div>
                                             )}
-                                            {kw.status === "completed" && kw.currentPosition && (
+                                            {kw.status === "complete" && kw.currentPosition && (
                                                 <div className="text-center mt-1">
                                                     <div className={`flex items-center justify-center gap-1 text-sm font-medium ${change.class}`}>
                                                         {change.icon}
@@ -233,7 +377,7 @@ export default function RankTracker() {
                                         </div>
 
                                         {/* Stats */}
-                                        {kw.status === "completed" && (
+                                        {kw.status === "complete" && (
                                             <div className="hidden md:flex items-center gap-5">
                                                 <div className="text-center">
                                                     <p className="text-sm font-bold text-primary">{kw.bestPosition || "—"}</p>
@@ -255,7 +399,7 @@ export default function RankTracker() {
                                                 <RefreshCw size={16} className={refreshing === kw._id ? "animate-spin" : ""} />
                                             </button>
                                             <button
-                                                onClick={() => handleToggle(kw._id)}
+                                                // onClick={() => handleToggle(kw._id)}
                                                 className={`p-2 rounded-lg hover:bg-muted transition-all ${kw.active ? "text-success hover:text-success" : "text-muted-foreground hover:text-foreground"}`}
                                                 title={kw.active ? "Pause Tracking" : "Resume Tracking"}
                                             >
